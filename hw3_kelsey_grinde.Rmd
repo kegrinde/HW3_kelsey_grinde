@@ -1,0 +1,121 @@
+---
+title: "HW3"
+author: "Kelsey Grinde"
+date: "3/2/2015"
+output: html_document
+---
+
+# Instructions:
+The goal of this homework is to reproduce the results in Figure 2 in this paper: Qian, F., Bolen, C. R., Jing, C., Wang, X., Zheng, W., Zhao, H., et al. (2013). Impaired toll-like receptor 3-mediated immune responses from macrophages of patients chronically infected with hepatitis C virus. Clinical and Vaccine Immunology : CVI, 20(2), 146–155. doi:10.1128/CVI.00530-12
+
+
+First, a little setup to get all the packages we will need.
+```{r}
+# setup for use of Bioconductor
+suppressMessages(source('http://bioconductor.org/biocLite.R'))
+
+# download packages
+suppressMessages(library(GEOmetadb))
+suppressMessages(library(limma))
+suppressMessages(library(Biobase))
+suppressMessages(library(data.table))
+```
+
+# Getting the data
+Now we're ready to get the data from GEO:
+
+```{r get-data,cache=T}
+# get the data, accession number GSE40812
+# This accession number is stated in the paper, but we also could have used our results from HW2 to figure out which accession number to use
+data <- getGEO("GSE40812", destdir = getwd())
+
+# pull out the data
+data <- data[[1]]
+```
+
+
+We are going to need to clean up the information about the samples a bit. There is some information here that we really don't need for this analysis, and other information that can be abbreviated to make things a little cleaner.
+```{r}
+sample_info <- pData(data) # data.frame with one row per sample (80)
+```
+
+```{r explore-pData, echo = F}
+### geo_accession is same as row names
+### title may be helpful to keep
+### for source_name_ch1 we have two options (keep but clean):
+levels(sample_info$source_name_ch1)
+### for characteristics_ch1 we have two options (keep but clean):
+levels(sample_info$characteristics_ch1)
+### for characteristics_ch1.1 we have two options (keep but clean):
+levels(sample_info$characteristics_ch1.1)
+### for characteristics_ch1.2 we have three options (keep but clean):
+levels(sample_info$characteristics_ch1.2)
+### for description we have 8 options (keep but clean):
+levels(sample_info$description)
+### don't need anything else (all the same)
+```
+
+```{r}
+# cleaning up the pData
+keepCols <- c('source_name_ch1','characteristics_ch1','characteristics_ch1.1',
+              'characteristics_ch1.2','description','title')
+pD <- sample_info[,keepCols]
+pD <- within(pD, {
+  cell_type <- ifelse(source_name_ch1=='Monocyte-derived Macrophage','Macrophage','PBMC')
+  infected <- ifelse(characteristics_ch1=='infection status: Pos',1,0)
+  treatment <- ifelse(characteristics_ch1.2=='treatment: Mock','Mock',
+                      ifelse(characteristics_ch1.2=='treatment: Poly IC H', 'Poly IC H', 'Poly IC L'))
+  subj_id <- substr(title,regexpr("_",title)+1,regexpr("_",title)+4)
+  }
+)
+pD$characteristics_ch1.2 <- NULL
+pD$source_name_ch1 <- NULL
+pD$characteristics_ch1 <- NULL
+pD$characteristics_ch1.1 <- NULL
+pD$description <- NULL
+pD$title <- NULL
+```
+
+Now, we notice that there are two different experiements here: one involving macrophages and one involving PBMCs. To reproduce Figure 2 we only need the macrophage data.
+```{r}
+# keep only the macrophage data
+pD <- subset(pD, cell_type=="Macrophage")
+
+# get the expression data
+eSet <- exprs(data)
+# only keep the macrophage data
+eSet <- eSet[,rownames(pD)]
+
+# feature data including gene name, chromosome and much more
+feature_info <- fData(data) # data.frame with one row per feature
+### pull out just ID, ILMN_Gene, Chromosome
+features <- feature_info[,c("ID","ILMN_Gene","Chromosome")]
+```
+
+# Normalizing the data
+The next step is to normalize the data (if necessary)
+
+According to the paper, the data have already been normalized using quantile normalization via the `lumi` package in bioconductor, so there is nothing more for us to do here. We can also check whether the data have been normalized by looking at the sample information we extracted using `pData()`.
+
+```{r data-processing}
+# print out data processing information
+levels(sample_info$data_processing)
+```
+
+# Using LIMMA
+Now we will use LIMMA to test for differential expression
+
+According to the paper, they used LIMMA to analyze differential expression and used the BH method to control FDR at 5%.
+
+```{r limma,cache=T}
+
+```
+
+# Making a heatmap
+Display the results using a heatmap [Hint: Use the pheatmap package]
+
+# Cleanup
+
+```{r}
+dbDisconnect(con)
+```
