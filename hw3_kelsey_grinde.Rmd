@@ -10,7 +10,7 @@ The goal of this homework is to reproduce the results in Figure 2 in this paper:
 
 
 First, a little setup to get all the packages we will need.
-```{r}
+```{r set-up}
 # setup for use of Bioconductor
 suppressMessages(source('http://bioconductor.org/biocLite.R'))
 
@@ -35,11 +35,13 @@ data <- data[[1]]
 
 
 We are going to need to clean up the information about the samples a bit. There is some information here that we really don't need for this analysis, and other information that can be abbreviated to make things a little cleaner.
-```{r}
+```{r get-samp-info}
 sample_info <- pData(data) # data.frame with one row per sample (80)
 ```
 
 ```{r explore-pData, echo = F}
+## This code is used to look at the sample information and figure out how to clean it
+
 ### geo_accession is same as row names
 ### title may be helpful to keep
 ### for source_name_ch1 we have two options (keep but clean):
@@ -55,16 +57,15 @@ levels(sample_info$description)
 ### don't need anything else (all the same)
 ```
 
-```{r}
+```{r clean-sample-info}
 # cleaning up the pData
 keepCols <- c('source_name_ch1','characteristics_ch1','characteristics_ch1.1',
               'characteristics_ch1.2','description','title')
 pD <- sample_info[,keepCols]
 pD <- within(pD, {
   cell_type <- ifelse(source_name_ch1=='Monocyte-derived Macrophage','Macrophage','PBMC')
-  infected <- ifelse(characteristics_ch1=='infection status: Pos',1,0)
-  treatment <- ifelse(characteristics_ch1.2=='treatment: Mock','Mock',
-                      ifelse(characteristics_ch1.2=='treatment: Poly IC H', 'Poly IC H', 'Poly IC L'))
+  infected <- ifelse(characteristics_ch1=='infection status: Pos',"pos","neg")
+  treatment <- ifelse(characteristics_ch1.2=='treatment: Mock','Mock', 'Poly')
   subj_id <- substr(title,regexpr("_",title)+1,regexpr("_",title)+4)
   }
 )
@@ -77,9 +78,10 @@ pD$title <- NULL
 ```
 
 Now, we notice that there are two different experiements here: one involving macrophages and one involving PBMCs. To reproduce Figure 2 we only need the macrophage data.
-```{r}
+```{r get-only-macrophages}
 # keep only the macrophage data
 pD <- subset(pD, cell_type=="Macrophage")
+pData(data) <- pD
 
 # get the expression data
 eSet <- exprs(data)
@@ -95,7 +97,7 @@ features <- feature_info[,c("ID","ILMN_Gene","Chromosome")]
 # Normalizing the data
 The next step is to normalize the data (if necessary)
 
-According to the paper, the data have already been normalized using quantile normalization via the `lumi` package in bioconductor, so there is nothing more for us to do here. We can also check whether the data have been normalized by looking at the sample information we extracted using `pData()`.
+According to the paper, the data have already been normalized using quantile normalization via the `beadarray` package in bioconductor, so there is nothing more for us to do here. We can also check whether the data have been normalized by looking at the sample information we extracted using `pData()` (note that here it says the data were normalized using the `lumi` package in bioconductor).
 
 ```{r data-processing}
 # print out data processing information
@@ -105,14 +107,117 @@ levels(sample_info$data_processing)
 # Using LIMMA
 Now we will use LIMMA to test for differential expression
 
-According to the paper, they used LIMMA to analyze differential expression and used the BH method to control FDR at 5%.
+According to the paper, they used LIMMA to analyze differential expression and looked for genes with at least a 1.5-fold change in expression and that were significant based on a BH FDR cutoff of 5%.
 
-```{r limma,cache=T}
+First they looked for genes that were differentially expressed by macrophages, looking at changes between Mock and Poly IC H for each subject, controlling FDR at 5% using the BH method and also restricting themselves to looking at genes with a 1.5-fold change in expression.
+```{r, cache=T}
+# look at differential expression between mock and poly, adjusting for infection
+mm1 <- model.matrix(~treatment,pD)
 
+# fit LIMMA model
+fit1 <- lmFit(eSet,mm1)
+ebay1 <- eBayes(fit1)
+
+# get genes where treatment is signifcant and we see at least a 1.5-fold change
+topTx1 <- topTable(ebay1,coef='treatmentPoly',adjust.method='BH',p.value = 0.05,lfc=log2(1.5),number=Inf)
+sigGenes <- rownames(topTx1)
+length(sigGenes) # should be 1146
+
+##########################################
+##########################################
+### alternatively, we might want to include subject since we have paired samples
+mm1_alt <- model.matrix(~subj_id+treatment,pD)
+
+# fit LIMMA model
+fit1_alt <- lmFit(eSet,mm1_alt)
+ebay1_alt <- eBayes(fit1_alt)
+
+# get genes where treatment is signifcant and we see at least a 1.5-fold change
+topTx1_alt <- topTable(ebay1_alt,coef='treatmentPoly',adjust.method='BH',p.value = 0.05,lfc=log2(1.5),number=Inf)
+sigGenes_alt <- rownames(topTx1_alt)
+length(sigGenes_alt) # now we have 153
 ```
+
+Further analyses focus only on these genes found above with significant differential expression between the two treatments. I'm going to use the 1146 genes found using the method described in the paper to see if I can reproduce their later results.
+
+```{r restrict-to-deTx-genes}
+# keep only significant genes and macrophage data
+restrict_eSet <- exprs(data[sigGenes,rownames(pD)])
+```
+
+# COMPLETE ABOVE HERE..
+
+# Test section
+"Fold changes were calculatedbetween each subject’s paired mock and poly(I·C) sample, and then the fold change values for VL patients were compared with those of VL patients to determine significant gene changes. The expression values of the poly(I·C) signature genes show modest differences between VL and VL groups (Fig. 2), and no genes were found to be significantly different following FDR correctionsHowever, to focus on genes that may contribute to successful clearance of HCV, we identified 43 probe sets that had a P value of < 
+0.1"
+
+Next they calculated the fold changes in expression from mock to treatment for each subject, for each gene.
+```{r}
+# get log fold change from mock to treatment for each subject for each gene
+mm4 <- model.matrix(~0+subj_id*treatment,pD)
+colnames(mm4) <- substr(colnames(mm4),6,nchar(colnames(mm4)))
+colnames(mm4)[21] <- 'id2014_Poly'
+colnames(mm4)[22:40] <- gsub(':treatment','_',colnames(mm4)[22:40])
+fit4 <- lmFit(restrict_eSet,mm4)
+
+# make contrasts to get change for each subject from mock to treatment
+cont2_mat <- makeContrasts(id2014_Poly-id2014,id2046_Poly-id2046,id2047_Poly-id2047,id2048_Poly-id2048,
+                       id2049_Poly-id2049,id2050_Poly-id2050,id2051_Poly-id2051,id2052_Poly-id2052,
+                       id2053_Poly-id2053,id2054_Poly-id2054,id3049_Poly-id3049,id3050_Poly-id3050,
+                       id3052_Poly-id3052,id3053_Poly-id3053,id3054_Poly-id3054,id3055_Poly-id3055,
+                       id3056_Poly-id3056,id3057_Poly-id3057,id3058_Poly-id3058,id3059_Poly-id3059,
+                       levels=colnames(mm4))
+tmp_fit <- contrasts.fit(fit4,cont2_mat)
+
+# figure out which subject is infected vs not
+tmp <- pD[,c('subj_id','infected')]
+tmp <- tmp[order(tmp$subj_id),]
+infected <- tmp$infected[seq(1,nrow(tmp),2)]
+names(infected) <- tmp$subj_id[seq(1,nrow(tmp),2)]
+
+cont3 <- makeContrasts((2014))
+
+cont3
+```
+
+
+Now we want to get fold change values for infected vs non-infected individuals. When we correct for FDR, we find that there is no gene that shows a signficant difference between subjects infected and not infected with HCV.
+
+```{r}
+grps <- as.factor(paste(pD$treatment,pD$infected,sep=''))
+mm2 <- model.matrix(~grps,pD)
+colnames(mm2)[1] <- 'grpsMockneg'
+
+# fit model 
+fit2 <- lmFit(restrict_eSet, mm2)
+
+# make contrasts to compare the mock to the poly among the HCV positive vs among the HCV negative
+cont_matrix <- makeContrasts(grpsMockneg-grpsMockpos, grpsPolyneg-grpsPolypos, levels = mm2)
+fit3 <- contrasts.fit(fit2,cont_matrix)
+ebay3 <- eBayes(fit3)
+
+# look at logfc values for Poly vs mock among HCV negative subjects
+topT <- topTable(ebay3,number=Inf,sort.by='none')
+```
+
+
 
 # Making a heatmap
 Display the results using a heatmap [Hint: Use the pheatmap package]
+
+```{r}
+library(pheatmap)
+#Subset the probes we found in the second analysis
+top_topT <- topTable(ebay3,number=43)
+
+# get pD for heatmap
+keep_pD = pD[,c("subj_id","treatment","infected")]
+
+#Sort by poly/mock and then by VL-/VL+
+keep_pD = keep_pD[order(keep_pD[,"treatment"],keep_pD[,"infected"]),]
+
+
+```
 
 # Cleanup
 
