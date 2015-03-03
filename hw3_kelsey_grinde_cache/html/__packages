@@ -1,0 +1,10 @@
+base
+BiocInstaller
+BiocGenerics
+Biobase
+GEOquery
+DBI
+RSQLite
+GEOmetadb
+limma
+data.table

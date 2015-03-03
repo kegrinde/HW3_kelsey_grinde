@@ -39,7 +39,7 @@ We are going to need to clean up the information about the samples a bit. There 
 sample_info <- pData(data) # data.frame with one row per sample (80)
 ```
 
-```{r explore-pData, echo = F}
+```{r explore-pData, echo = F, eval =F}
 ## This code is used to look at the sample information and figure out how to clean it
 
 ### geo_accession is same as row names
@@ -105,12 +105,11 @@ levels(sample_info$data_processing)
 ```
 
 # Using LIMMA
-Now we will use LIMMA to test for differential expression
+Now we will use LIMMA to test for differential expression.
 
-According to the paper, they used LIMMA to analyze differential expression and looked for genes with at least a 1.5-fold change in expression and that were significant based on a BH FDR cutoff of 5%.
+First the authors looked for genes that were differentially expressed by macrophages, looking at changes between Mock and Poly IC H for each subject, controlling FDR at 5% using the BH method and also restricting themselves to looking at genes with a 1.5-fold change in expression.
 
-First they looked for genes that were differentially expressed by macrophages, looking at changes between Mock and Poly IC H for each subject, controlling FDR at 5% using the BH method and also restricting themselves to looking at genes with a 1.5-fold change in expression.
-```{r, cache=T}
+```{r de-tx, cache=T}
 # look at differential expression between mock and poly, adjusting for infection
 mm1 <- model.matrix(~treatment,pD)
 
@@ -121,7 +120,7 @@ ebay1 <- eBayes(fit1)
 # get genes where treatment is signifcant and we see at least a 1.5-fold change
 topTx1 <- topTable(ebay1,coef='treatmentPoly',adjust.method='BH',p.value = 0.05,lfc=log2(1.5),number=Inf)
 sigGenes <- rownames(topTx1)
-length(sigGenes) # should be 1146
+length(sigGenes) # 1146, matches the paper
 
 ##########################################
 ##########################################
@@ -135,7 +134,7 @@ ebay1_alt <- eBayes(fit1_alt)
 # get genes where treatment is signifcant and we see at least a 1.5-fold change
 topTx1_alt <- topTable(ebay1_alt,coef='treatmentPoly',adjust.method='BH',p.value = 0.05,lfc=log2(1.5),number=Inf)
 sigGenes_alt <- rownames(topTx1_alt)
-length(sigGenes_alt) # now we have 153
+length(sigGenes_alt) # now we have 1153, a few more than the paper found
 ```
 
 Further analyses focus only on these genes found above with significant differential expression between the two treatments. I'm going to use the 1146 genes found using the method described in the paper to see if I can reproduce their later results.
@@ -145,82 +144,87 @@ Further analyses focus only on these genes found above with significant differen
 restrict_eSet <- exprs(data[sigGenes,rownames(pD)])
 ```
 
-# COMPLETE ABOVE HERE..
+Next the authors calculated the fold changes between the Mock and Poly IC H samples for each subject.
 
-# Test section
-"Fold changes were calculatedbetween each subject’s paired mock and poly(I·C) sample, and then the fold change values for VL patients were compared with those of VL patients to determine significant gene changes. The expression values of the poly(I·C) signature genes show modest differences between VL and VL groups (Fig. 2), and no genes were found to be significantly different following FDR correctionsHowever, to focus on genes that may contribute to successful clearance of HCV, we identified 43 probe sets that had a P value of < 
-0.1"
-
-Next they calculated the fold changes in expression from mock to treatment for each subject, for each gene.
-```{r}
+```{r fold-change}
 # get log fold change from mock to treatment for each subject for each gene
-mm4 <- model.matrix(~0+subj_id*treatment,pD)
-colnames(mm4) <- substr(colnames(mm4),6,nchar(colnames(mm4)))
-colnames(mm4)[21] <- 'id2014_Poly'
-colnames(mm4)[22:40] <- gsub(':treatment','_',colnames(mm4)[22:40])
-fit4 <- lmFit(restrict_eSet,mm4)
+mm2 <- model.matrix(~0+subj_id*treatment,pD)
+
+# clean up column names so we can make contrasts
+colnames(mm2) <- substr(colnames(mm2),6,nchar(colnames(mm2)))
+colnames(mm2)[21] <- 'id2014_Poly'
+colnames(mm2)[22:40] <- gsub(':treatment','_',colnames(mm2)[22:40])
+
+# get expression for each subject in mock and treatment
+fit2 <- lmFit(restrict_eSet,mm2) # run just on restricted eSet
 
 # make contrasts to get change for each subject from mock to treatment
-cont2_mat <- makeContrasts(id2014_Poly-id2014,id2046_Poly-id2046,id2047_Poly-id2047,id2048_Poly-id2048,
-                       id2049_Poly-id2049,id2050_Poly-id2050,id2051_Poly-id2051,id2052_Poly-id2052,
-                       id2053_Poly-id2053,id2054_Poly-id2054,id3049_Poly-id3049,id3050_Poly-id3050,
-                       id3052_Poly-id3052,id3053_Poly-id3053,id3054_Poly-id3054,id3055_Poly-id3055,
-                       id3056_Poly-id3056,id3057_Poly-id3057,id3058_Poly-id3058,id3059_Poly-id3059,
-                       levels=colnames(mm4))
-tmp_fit <- contrasts.fit(fit4,cont2_mat)
+cont2_mat <- makeContrasts(id2014_Poly-id2014,id2046_Poly-id2046,id2047_Poly-id2047,
+                           id2048_Poly-id2048,id2049_Poly-id2049,id2050_Poly-id2050,
+                           id2051_Poly-id2051,id2052_Poly-id2052,id2053_Poly-id2053,
+                           id2054_Poly-id2054,id3049_Poly-id3049,id3050_Poly-id3050,
+                           id3052_Poly-id3052,id3053_Poly-id3053,id3054_Poly-id3054,
+                           id3055_Poly-id3055,id3056_Poly-id3056,id3057_Poly-id3057,
+                           id3058_Poly-id3058,id3059_Poly-id3059,
+                           levels=colnames(mm2))
+
+cont_fit2 <- contrasts.fit(fit2,cont2_mat) # this should be estimated lfc for each subject between their mock and poly samples at each gene
+
+# get new response for next analysis:
+lfc_subj <- cont_fit2$coef
+colnames(lfc_subj) <- c('id2014','id2046','id2047','id2048','id2049','id2050',
+                        'id2051','id2052','id2053','id2054','id3049','id3050',
+                        'id3052','id3053','id3054','id3055','id3056','id3057',
+                        'id3058','id3059')
 
 # figure out which subject is infected vs not
-tmp <- pD[,c('subj_id','infected')]
-tmp <- tmp[order(tmp$subj_id),]
-infected <- tmp$infected[seq(1,nrow(tmp),2)]
-names(infected) <- tmp$subj_id[seq(1,nrow(tmp),2)]
+subj_info <- pD[,c('subj_id','infected')]
+subj_info <- subj_info[order(subj_info $subj_id),]
+df_infected <- subj_info[seq(1,nrow(subj_info),2),]
+rownames(df_infected) <- paste('id',df_infected$subj_id,sep='')
+df_infected$subj_id <- NULL
 
-cont3 <- makeContrasts((2014))
-
-cont3
 ```
 
+They compared these fold changes for HCV + and HCV - subjects to see if there were significantly different fold changes between HCV + and HCV - subjects.
 
-Now we want to get fold change values for infected vs non-infected individuals. When we correct for FDR, we find that there is no gene that shows a signficant difference between subjects infected and not infected with HCV.
+```{r compare-lfc}
+mm3 <- model.matrix(~infected,df_infected)
 
-```{r}
-grps <- as.factor(paste(pD$treatment,pD$infected,sep=''))
-mm2 <- model.matrix(~grps,pD)
-colnames(mm2)[1] <- 'grpsMockneg'
-
-# fit model 
-fit2 <- lmFit(restrict_eSet, mm2)
-
-# make contrasts to compare the mock to the poly among the HCV positive vs among the HCV negative
-cont_matrix <- makeContrasts(grpsMockneg-grpsMockpos, grpsPolyneg-grpsPolypos, levels = mm2)
-fit3 <- contrasts.fit(fit2,cont_matrix)
+# fit LIMMA model
+fit3 <- lmFit(lfc_subj,mm3)
 ebay3 <- eBayes(fit3)
 
-# look at logfc values for Poly vs mock among HCV negative subjects
-topT <- topTable(ebay3,number=Inf,sort.by='none')
+# look at differential lfc between HCV + vs HCV - subjects
+topT3 <- topTable(ebay3,coef='infectedpos',adjust.method='BH',p.value=0.05,number=Inf) # nothing significant after BH adjustment
+
+# try again with no BH adjustment
+topT3_noBH <- topTable(ebay3, coef= 'infectedpos',adjust.method='none',p.value=0.1,lfc=log2(1.5), number=Inf)
 ```
 
-
+No genes show significant differences beteween HCV + and HCV - subjects after adjusting p-values to control FDR at 5% via BH, but I find that 30 have an unadjusted p-value less than 0.1. The author found 43, and the differences could be due to the way I analyzed the data above.
 
 # Making a heatmap
 Display the results using a heatmap [Hint: Use the pheatmap package]
 
 ```{r}
 library(pheatmap)
-#Subset the probes we found in the second analysis
-top_topT <- topTable(ebay3,number=43)
+# get the probes from the last analysis
+keep_probes <- rownames(topT3_noBH)
+pheatmap_eSet <- restrict_eSet[rownames(restrict_eSet) %in% keep_probes,]
 
 # get pD for heatmap
 keep_pD = pD[,c("subj_id","treatment","infected")]
 
-#Sort by poly/mock and then by VL-/VL+
-keep_pD = keep_pD[order(keep_pD[,"treatment"],keep_pD[,"infected"]),]
+#Sort by mock vs poly then by HCV- vs HCV + and then by ID
+keep_pD = keep_pD[order(keep_pD[,"treatment"],keep_pD[,"infected"],keep_pD[,'subj_id']),]
 
+# resort as above
+pheatmap_eSet <- pheatmap_eSet[,rownames(keep_pD)]
 
-```
+# change column names to subject IDs
+colnames(pheatmap_eSet) <- keep_pD[,'subj_id']
 
-# Cleanup
-
-```{r}
-dbDisconnect(con)
+# now display a heatmap of the expression values
+pheatmap(mat=pheatmap_eSet,cluster_rows=FALSE,cluster_cols=FALSE)
 ```
