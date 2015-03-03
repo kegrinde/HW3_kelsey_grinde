@@ -11,3 +11,7 @@ To do so, we will need to:
 2. Normalize the data (if necessary)
 3. Use limma to test for differential expression
 4. Display the results using a heatmap [Hint: Use the pheatmap package]
+
+Reviewer's Name: Yatong Li
+
+I will be reviewing: Xiaowen Tian
